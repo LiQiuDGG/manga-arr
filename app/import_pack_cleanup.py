@@ -29,6 +29,7 @@ from download_identity import (
     resolve_download_protocol,
 )
 from files import safe_join_under
+from noreplace_fallback import UNSUPPORTED_ERRNOS, rename_noreplace_fallback
 from shared import get_db
 
 log = logging.getLogger(__name__)
@@ -539,6 +540,9 @@ def _rename_noreplace(source: str, destination: str) -> None:
     )
     if result != 0:
         error_number = ctypes.get_errno()
+        if error_number in UNSUPPORTED_ERRNOS:
+            rename_noreplace_fallback(source, destination)
+            return
         raise OSError(
             error_number,
             os.strerror(error_number),

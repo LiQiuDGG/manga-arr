@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Literal, cast
 
 from events import add_history, log_event
+from noreplace_fallback import UNSUPPORTED_ERRNOS, rename_noreplace_fallback
 from parsing import extract_volume_num
 from shared import build_volume_label, get_db
 from volumes import _cascade_chapters
@@ -721,12 +722,9 @@ def _rename_noreplace(source: str, destination: str) -> None:
     if result == 0:
         return
     error_number = ctypes.get_errno()
-    if error_number in (errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP):
-        raise OSError(
-            errno.ENOTSUP,
-            "atomic no-replace rename is unsupported",
-            destination,
-        )
+    if error_number in UNSUPPORTED_ERRNOS:
+        rename_noreplace_fallback(source, destination)
+        return
     raise OSError(error_number, os.strerror(error_number), destination)
 
 

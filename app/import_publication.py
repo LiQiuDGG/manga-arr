@@ -30,6 +30,7 @@ from download_identity import (
 )
 from import_plan import _FilePlan, _ImportPlan
 from import_staging import _StageOutcome
+from noreplace_fallback import UNSUPPORTED_ERRNOS, rename_noreplace_fallback
 from shared import get_cfg, get_db
 
 log = logging.getLogger(__name__)
@@ -286,8 +287,9 @@ def _rename_noreplace(source: str, destination: str) -> None:
     """Atomically rename without replacing via Linux ``renameat2(2)``.
 
     Publication cannot safely emulate ``RENAME_NOREPLACE`` with a
-    check-then-rename sequence. Fail closed on non-Linux systems, old kernels,
-    C libraries without ``renameat2``, and filesystems that reject the flag.
+    check-then-rename sequence. Fail closed on non-Linux systems and C
+    libraries without ``renameat2``. Filesystems that reject the flag (NFS)
+    use ``noreplace_fallback``, which claims the name atomically instead.
     """
     if sys.platform != "linux":
         raise OSError(
@@ -322,12 +324,9 @@ def _rename_noreplace(source: str, destination: str) -> None:
     if result == 0:
         return
     error_number = ctypes.get_errno()
-    if error_number in (errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP):
-        raise OSError(
-            errno.ENOTSUP,
-            "atomic no-replace rename is unsupported",
-            destination,
-        )
+    if error_number in UNSUPPORTED_ERRNOS:
+        rename_noreplace_fallback(source, destination)
+        return
     raise OSError(error_number, os.strerror(error_number), destination)
 
 

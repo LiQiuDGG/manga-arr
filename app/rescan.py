@@ -24,6 +24,7 @@ from files import (
     sanitize_filename,
 )
 from helpers import _resolve_series_dest_root
+from noreplace_fallback import UNSUPPORTED_ERRNOS, rename_noreplace_fallback
 from parsing import extract_volume_num, vol_num_to_display
 from shared import get_cfg, get_db
 
@@ -903,6 +904,14 @@ def _rename_noreplace(source: str, destination: str) -> bool:
     if result == 0:
         return True
     error_number = ctypes.get_errno()
+    if error_number in UNSUPPORTED_ERRNOS:
+        try:
+            rename_noreplace_fallback(source, destination)
+        except OSError as exc:
+            if exc.errno in (errno.EEXIST, errno.ENOTEMPTY):
+                return False
+            raise
+        return True
     if error_number in (errno.EEXIST, errno.ENOTEMPTY):
         return False
     raise OSError(error_number, os.strerror(error_number), destination)
