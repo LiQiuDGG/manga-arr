@@ -1,4 +1,4 @@
-# Fork-only: builds 1.2.0 plus the NFS no-replace fallback (upstream issue #378) for an NFS-mounted
+# Fork-only: builds 1.2.0 plus the NFS no-replace fallback (upstream #378) and streaming ComicInfo injection, for an NFS-mounted
 # library. Retire this branch and image once upstream ships the fix.
 name: NFS fallback image
 
@@ -14,7 +14,7 @@ permissions:
 
 env:
   IMAGE: ghcr.io/liqiudgg/manga-arr
-  TAG: 1.2.0-nfs.1
+  TAG: 1.2.0-nfs.2
 
 jobs:
   image:

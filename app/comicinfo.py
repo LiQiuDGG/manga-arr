@@ -21,6 +21,10 @@ Pure move — no DB access, no state — just zip and XML I/O.
 from __future__ import annotations
 
 import os
+import shutil
+import stat
+import tempfile
+import time
 import zipfile
 
 from events import log_event
@@ -178,22 +182,61 @@ def inject_comicinfo(cbz_path: str, xml_content: str) -> bool:
     elif file_type != "cbz":
         return False  # CBR, EPUB, PDF — not injectable
     try:
-        # Read existing archive contents (excluding any old ComicInfo.xml)
-        with zipfile.ZipFile(cbz_path, "r") as zf:
-            entries = [
-                (name, zf.read(name))
-                for name in zf.namelist()
-                if not name.lower().endswith("comicinfo.xml")
-            ]
-        # Rewrite archive with new ComicInfo.xml at root
-        with zipfile.ZipFile(cbz_path, "w", zipfile.ZIP_STORED) as zf:
-            zf.writestr("ComicInfo.xml", xml_content.encode("utf-8"))
-            for name, data in entries:
-                zf.writestr(name, data)
+        _rewrite_with_comicinfo(cbz_path, xml_content)
         return True
     except (zipfile.BadZipFile, OSError, Exception) as e:
         log_event("error", f"[ComicInfo] Failed to inject into {cbz_path}: {e}")
         return False
+
+
+_COPY_CHUNK = 1024 * 1024
+
+
+def _rewrite_with_comicinfo(cbz_path: str, xml_content: str) -> None:
+    """Rewrite ``cbz_path`` with ``xml_content`` as its root ComicInfo.xml.
+
+    Entries stream one at a time into a sibling temp file, so memory stays at
+    one copy buffer rather than the whole volume, and the temp file replaces
+    the original only once complete; a failure leaves the original untouched.
+    Entry names, order, ZIP_STORED and writestr-style metadata are unchanged.
+    """
+    directory = os.path.dirname(os.path.abspath(cbz_path))
+    fd, temp_path = tempfile.mkstemp(
+        prefix=".comicinfo-", suffix=".cbz.tmp", dir=directory
+    )
+    try:
+        with os.fdopen(fd, "wb") as temp_file:
+            with zipfile.ZipFile(cbz_path, "r") as src, zipfile.ZipFile(
+                temp_file, "w", zipfile.ZIP_STORED
+            ) as dst:
+                dst.writestr("ComicInfo.xml", xml_content.encode("utf-8"))
+                for info in src.infolist():
+                    if info.filename.lower().endswith("comicinfo.xml"):
+                        continue
+                    if info.is_dir():
+                        dst.writestr(info.filename, b"")
+                        continue
+                    # Same metadata writestr() gives a str name.
+                    out_info = zipfile.ZipInfo(
+                        info.filename,
+                        date_time=time.localtime(time.time())[:6],
+                    )
+                    out_info.compress_type = zipfile.ZIP_STORED
+                    out_info.external_attr = 0o600 << 16
+                    with src.open(info) as entry, dst.open(
+                        out_info,
+                        "w",
+                        force_zip64=info.file_size >= zipfile.ZIP64_LIMIT,
+                    ) as out:
+                        shutil.copyfileobj(entry, out, _COPY_CHUNK)
+        os.chmod(temp_path, stat.S_IMODE(os.stat(cbz_path).st_mode))
+        os.replace(temp_path, cbz_path)
+    except BaseException:
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _try_inject_comicinfo(
