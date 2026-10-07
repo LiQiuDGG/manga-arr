@@ -515,6 +515,25 @@ def _vol_chapter_cbzs(manga_dir: str, volume_num: float) -> list[str]:
     return sorted(paths, key=_ch_sort_key)
 
 
+def _chapter_cbzs_for_numbers(manga_dir: str, chapter_nums: list[float]) -> list[str]:
+    """Chapter files for a volume by chapter number, in order, or [] if any chapter is missing.
+
+    A chapter offered by two scanlators is used once. A split part missing as a file (45.1, 45.2 in a
+    MangaDex-derived chapter list) falls back to the whole chapter's file (45) when the source publishes it whole.
+    A partial volume is never assembled.
+    """
+    paths: list[str] = []
+    for ch in chapter_nums:
+        path = _chapter_cbz(manga_dir, ch)
+        if path is None and ch != int(ch):
+            path = _chapter_cbz(manga_dir, float(int(ch)))
+        if path is None:
+            return []
+        if path not in paths:
+            paths.append(path)
+    return paths
+
+
 def _chapter_cbz(manga_dir: str, chapter_num: float) -> str | None:
     """Find the CBZ file for a specific chapter number in manga_dir."""
     ch_int = int(chapter_num)
@@ -860,6 +879,7 @@ async def _import_suwayomi_volume(
     volume_num: float,
     *,
     swy_title: str = "",
+    chapter_nums: list[float] | None = None,
 ) -> tuple[str | None, int]:
     """Import completed volume download into the managed library.
     If merge_chapters is enabled (default): merges chapter CBZs into one volume CBZ.
@@ -885,6 +905,9 @@ async def _import_suwayomi_volume(
         return None, 0
 
     chapter_paths = _vol_chapter_cbzs(manga_dir, volume_num)
+    if not chapter_paths and chapter_nums:
+        # Only MangaDex file names carry "Vol.<n>"; other sources need the job's chapter numbers
+        chapter_paths = _chapter_cbzs_for_numbers(manga_dir, chapter_nums)
     if not chapter_paths:
         log.warning(
             "No chapter CBZs found for series %d vol %s in %s",
@@ -1067,7 +1090,7 @@ async def _process_suwayomi_job(c: dict, job) -> None:
         query($mid: Int!) {
             manga(id: $mid) {
                 title
-                chapters { nodes { id isDownloaded } }
+                chapters { nodes { id isDownloaded chapterNumber } }
             }
         }
     """,
@@ -1080,6 +1103,12 @@ async def _process_suwayomi_job(c: dict, job) -> None:
         for ch in (data.get("manga") or {}).get("chapters", {}).get("nodes") or []
     }
     done = sum(1 for cid in chapter_ids if ch_map.get(cid, False))
+    wanted_ids = set(chapter_ids)
+    job_chapter_nums = sorted({
+        float(ch["chapterNumber"])
+        for ch in (data.get("manga") or {}).get("chapters", {}).get("nodes") or []
+        if int(ch["id"]) in wanted_ids and ch.get("chapterNumber") is not None
+    })
 
     with get_db() as db:
         db.execute(
@@ -1165,6 +1194,7 @@ async def _process_suwayomi_job(c: dict, job) -> None:
             job["series_id"],
             job["volume_num"],
             swy_title=swy_title,
+            chapter_nums=job_chapter_nums,
         )
         if not import_path:
             err_msg = "Import failed — CBZ files not found in library path"
