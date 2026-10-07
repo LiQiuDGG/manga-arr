@@ -14,7 +14,7 @@ permissions:
 
 env:
   IMAGE: ghcr.io/liqiudgg/manga-arr
-  TAG: 1.2.0-nfs.2
+  TAG: 1.2.0-nfs.3
 
 jobs:
   image:

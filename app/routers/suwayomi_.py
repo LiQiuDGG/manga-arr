@@ -60,6 +60,21 @@ async def _gql(c: dict, query: str, variables: dict | None = None) -> dict:
             raise RuntimeError(f"GraphQL: {msgs}")
         return payload.get("data") or {}
 
+async def _start_downloader(c: dict, chapters: list[dict]) -> None:
+    """Start Suwayomi's downloader for chapters just enqueued.
+
+    Suwayomi drops chapters it already has from the queue at once, and startDownloader then blocks until it
+    times out (30 s), so skip the call when every chapter is already downloaded. Any other failure is logged
+    rather than raised: the chapters are enqueued, and check_suwayomi_jobs() imports them once downloaded.
+    """
+    if chapters and all(ch.get("isDownloaded") for ch in chapters):
+        return
+    try:
+        await _gql(c, "mutation { startDownloader(input: {}) { clientMutationId } }")
+    except Exception as e:
+        log.warning("Suwayomi startDownloader failed (chapters stay queued): %s", e)
+
+
 
 def get_suwayomi_client(db) -> dict | None:
     row = db.execute(
@@ -627,7 +642,7 @@ async def suwayomi_grab(series_id: int, volume_num: float) -> bool:
         """,
             {"ids": chapter_ids},
         )
-        await _gql(c, "mutation { startDownloader(input: {}) { clientMutationId } }")
+        await _start_downloader(c, vol_chs)
 
         with get_db() as db:
             source_url = (
@@ -761,7 +776,7 @@ async def suwayomi_chapter_grab(series_id: int, chapter_num: float) -> bool:
         """,
             {"ids": chapter_ids},
         )
-        await _gql(c, "mutation { startDownloader(input: {}) { clientMutationId } }")
+        await _start_downloader(c, matched)
 
         with get_db() as db:
             torrent_name = f"Suwayomi DDL: {sd['title']} ch {chapter_num:g}"
