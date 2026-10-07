@@ -519,14 +519,19 @@ def _chapter_cbz(manga_dir: str, chapter_num: float) -> str | None:
     """Find the CBZ file for a specific chapter number in manga_dir."""
     ch_int = int(chapter_num)
     frac = chapter_num - ch_int
-    # Match exact chapter: Ch.5 for integer, Ch.5.5 for decimal
-    pattern = rf"Ch\.{ch_int}\b" if frac == 0 else rf"Ch\.{chapter_num}"
-    for fname in os.listdir(manga_dir):
-        if not fname.lower().endswith(".cbz"):
-            continue
-        if re.search(pattern, fname, re.IGNORECASE):
-            return os.path.join(manga_dir, fname)
-    return None
+    # Sources name chapters differently: "Vol.1 Ch.5" (MangaDex), "Ch. 5" (MangaFire), "Chapter 5" (Weeb Central,
+    # Atsumaru), "# 5" (Atsumaru), behind a scanlator prefix such as "Delta_". Match any of them for exactly this
+    # number: 5 must not match 50, 5.5 or 15; 5.5 must not match 5.55.
+    number = rf"0*{ch_int}(?![\d.]*\d)" if frac == 0 else rf"0*{ch_int}\.{str(chapter_num).split('.', 1)[1]}(?!\d)"
+    pattern = rf"(?:(?<![a-z])ch(?:apter)?\.?\s*|#\s*){number}"
+    matches = [
+        fname for fname in os.listdir(manga_dir)
+        if fname.lower().endswith(".cbz") and re.search(pattern, fname, re.IGNORECASE)
+    ]
+    if not matches:
+        return None
+    # "Ch. 1" over "Ch. 1 - Extra story 2": the plainest name is the chapter itself
+    return os.path.join(manga_dir, min(matches, key=lambda f: (len(f), f)))
 
 
 def _merge_cbzs(chapter_paths: list[str], output_path: str) -> int:
