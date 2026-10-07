@@ -1222,6 +1222,52 @@ async def _process_suwayomi_job(c: dict, job) -> None:
 # ── Monitoring loop ───────────────────────────────────────────────────────────
 
 
+def _covered_chapter_bound(db, series_id: int) -> float | None:
+    """Highest chapter already held in a downloaded volume, or None if no volume is downloaded.
+
+    Chapters missing from the chapter->volume map are stored with volume_id NULL even when an owned volume
+    contains them. Without this bound they look uncollected and get downloaded again as loose chapters.
+    """
+    row = db.execute(
+        "SELECT MAX(ch.chapter_num) FROM chapters ch JOIN volumes v ON v.id = ch.volume_id"
+        " WHERE ch.series_id=? AND v.status='downloaded'",
+        (series_id,),
+    ).fetchone()
+    bound = row[0] if row else None
+    top = db.execute(
+        "SELECT MAX(volume_num) FROM volumes WHERE series_id=? AND status='downloaded'",
+        (series_id,),
+    ).fetchone()
+    top_vol = top[0] if top else None
+    map_row = db.execute("SELECT chapter_vol_map FROM series WHERE id=?", (series_id,)).fetchone()
+    if top_vol is not None and map_row and map_row[0]:
+        try:
+            mapped = json.loads(map_row[0])
+        except (TypeError, ValueError):
+            mapped = {}
+        if isinstance(mapped, dict):
+            in_owned = [
+                float(ch) for ch, vol in mapped.items()
+                if vol is not None and float(vol) <= float(top_vol)
+            ]
+            if in_owned:
+                bound = max(in_owned + ([bound] if bound is not None else []))
+    return float(bound) if bound is not None else None
+
+
+def _uncollected_chapters_to_grab(db, series_id: int) -> list:
+    """Wanted, monitored chapters with no volume that are newer than the owned volumes cover."""
+    rows = db.execute(
+        "SELECT chapter_num FROM chapters WHERE series_id=? AND status='wanted'"
+        " AND monitored=1 AND volume_id IS NULL",
+        (series_id,),
+    ).fetchall()
+    bound = _covered_chapter_bound(db, series_id)
+    if bound is None:
+        return rows
+    return [r for r in rows if r[0] is not None and float(r[0]) > bound]
+
+
 async def _suwayomi_sync_series(c: dict, s: dict) -> tuple[int, int]:
     """
     Sync one series against Suwayomi's live chapter feed.
@@ -1333,11 +1379,7 @@ async def _suwayomi_sync_series(c: dict, s: dict) -> tuple[int, int]:
         ).fetchall()
 
         # ── 3. Wanted uncollected chapters ────────────────────────────────────
-        wanted_chs = db.execute(
-            "SELECT chapter_num FROM chapters WHERE series_id=? AND status='wanted'"
-            " AND monitored=1 AND volume_id IS NULL",
-            (series_id,),
-        ).fetchall()
+        wanted_chs = _uncollected_chapters_to_grab(db, series_id)
 
     # Grab wanted volumes whose chapters are available in Suwayomi
     for row in wanted_vols:
