@@ -524,10 +524,14 @@ def _chapter_cbz(manga_dir: str, chapter_num: float) -> str | None:
     # number: 5 must not match 50, 5.5 or 15; 5.5 must not match 5.55.
     number = rf"0*{ch_int}(?![\d.]*\d)" if frac == 0 else rf"0*{ch_int}\.{str(chapter_num).split('.', 1)[1]}(?!\d)"
     pattern = rf"(?:(?<![a-z])ch(?:apter)?\.?\s*|#\s*){number}"
-    matches = [
-        fname for fname in os.listdir(manga_dir)
-        if fname.lower().endswith(".cbz") and re.search(pattern, fname, re.IGNORECASE)
-    ]
+    names = [fname for fname in os.listdir(manga_dir) if fname.lower().endswith(".cbz")]
+    matches = [fname for fname in names if re.search(pattern, fname, re.IGNORECASE)]
+    if not matches:
+        # Some sources title chapters with a series-specific word: "Official_Mission 100" (SPY x FAMILY),
+        # "Official_quest 100", "Official_Chime 14". Accept only "<scanlator>_<one word> <number>.cbz" ending in
+        # exactly this number, so titles like "Chapter 10 - The 2nd Battle" never match on a stray number.
+        word = rf"_[^\W\d_]+ {number}\.cbz$"
+        matches = [fname for fname in names if re.search(word, fname, re.IGNORECASE)]
     if not matches:
         return None
     # "Ch. 1" over "Ch. 1 - Extra story 2": the plainest name is the chapter itself

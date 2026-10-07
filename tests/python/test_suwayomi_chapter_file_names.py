@@ -65,3 +65,26 @@ def test_non_cbz_ignored(tmp_path: Path) -> None:
 
     d = _dir(tmp_path, ["Official_Chapter 17.zip"])
     assert suwayomi_._chapter_cbz(str(d), 17.0) is None
+
+
+@pytest.mark.parametrize("name", ["Official_Mission 100.cbz", "Official_quest 100.cbz", "Official_Chime 100.cbz"])
+def test_series_specific_chapter_word(tmp_path: Path, name: str) -> None:
+    from routers import suwayomi_
+
+    d = _dir(tmp_path, [name, "Official_Mission 1000.cbz", "Official_Mission 10.cbz"])
+    assert suwayomi_._chapter_cbz(str(d), 100.0) == str(d / name)
+
+
+def test_word_fallback_needs_exact_trailing_number(tmp_path: Path) -> None:
+    from routers import suwayomi_
+
+    d = _dir(tmp_path, ["Official_Chapter 10 - The 2nd Battle.cbz", "Official_Two Words 2.cbz", "Official_Mission 2.5.cbz"])
+    assert suwayomi_._chapter_cbz(str(d), 2.0) is None
+    assert suwayomi_._chapter_cbz(str(d), 2.5) == str(d / "Official_Mission 2.5.cbz")
+
+
+def test_standard_pattern_wins_over_word_fallback(tmp_path: Path) -> None:
+    from routers import suwayomi_
+
+    d = _dir(tmp_path, ["Official_Mission 100.cbz", "Official_Chapter 100.cbz"])
+    assert suwayomi_._chapter_cbz(str(d), 100.0) == str(d / "Official_Chapter 100.cbz")
